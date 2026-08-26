@@ -10,6 +10,9 @@ import json
 import uuid
 
 
+SCHEMA_VERSION = 1
+
+
 @dataclass
 class ToolCall:
     name: Optional[str] = None
@@ -38,9 +41,21 @@ class TraceStep:
     tokens: Optional[int] = None
     cost_usd: Optional[float] = None
     latency_ms: Optional[float] = None
+    schema_version: int = SCHEMA_VERSION
 
     def to_dict(self):
         return asdict(self)
+
+    def validate(self):
+        if not self.trace_id:
+            raise ValueError("trace_id must not be empty")
+        if self.step_id < 0:
+            raise ValueError("step_id must be non-negative")
+        if self.action_type not in {"tool_call", "message", "final_answer"}:
+            raise ValueError(f"unsupported action_type: {self.action_type}")
+        if self.action_type == "tool_call" and not self.tool_call:
+            raise ValueError("tool_call steps must include tool_call data")
+        return self
 
 
 class TraceWriter:
@@ -51,7 +66,8 @@ class TraceWriter:
         self.path = path
 
     def write_step(self, step: TraceStep):
-        with open(self.path, "a") as f:
+        step.validate()
+        with open(self.path, "a", encoding="utf-8") as f:
             f.write(json.dumps(step.to_dict()) + "\n")
 
 

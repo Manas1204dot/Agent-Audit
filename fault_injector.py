@@ -41,8 +41,23 @@ def inject_fault(steps: list, injection_type: str = None, rng: random.Random = N
     rng = rng or random.Random()
     steps = copy.deepcopy(steps)
     injection_type = injection_type or rng.choice(INJECTION_TYPES)
+    if injection_type not in INJECTION_TYPES:
+        raise ValueError(f"unsupported injection type: {injection_type}")
 
-    tool_step_idxs = [i for i, s in enumerate(steps) if s.get("action_type") == "tool_call"]
+    tool_step_idxs = [i for i, s in enumerate(steps)
+                      if s.get("action_type") == "tool_call"]
+    if injection_type == "hallucinated_claim":
+        tool_step_idxs = [i for i in tool_step_idxs
+                          if any(s.get("action_type") in ("message", "final_answer")
+                                 for s in steps[i + 1:])]
+    elif injection_type == "swapped_tool_result":
+        tool_step_idxs = [i for i in tool_step_idxs
+                          if steps[i].get("tool_result")
+                          and any(j != i and steps[j].get("tool_result")
+                                  and steps[j]["tool_result"].get("output")
+                                  for j in range(len(steps)))]
+    elif injection_type == "dropped_step":
+        tool_step_idxs = [i for i in tool_step_idxs if i < len(steps) - 1]
     if not tool_step_idxs:
         return None  # nothing to corrupt in this trace
 
@@ -66,6 +81,8 @@ def inject_fault(steps: list, injection_type: str = None, rng: random.Random = N
                 )
                 label["target_step_id"] = steps[j]["step_id"]
                 break
+        else:
+            return None
 
     elif injection_type == "truncated_tool_result" and steps[target_idx].get("tool_result"):
         out = steps[target_idx]["tool_result"].get("output") or ""
@@ -78,6 +95,8 @@ def inject_fault(steps: list, injection_type: str = None, rng: random.Random = N
         ]
         if other_results:
             steps[target_idx]["tool_result"]["output"] = rng.choice(other_results)
+        else:
+            return None
 
     elif injection_type == "dropped_step":
         del steps[target_idx]
@@ -85,14 +104,16 @@ def inject_fault(steps: list, injection_type: str = None, rng: random.Random = N
     return steps, label
 
 
-def build_fault_dataset(clean_traces_path: str, out_path: str, seed: int = 0):
+def build_fault_dataset(clean_traces_path: str, out_path: str, seed: int = 0,
+                        injection_type: str = None):
     rng = random.Random(seed)
     traces = load_traces(clean_traces_path)
 
     n_written = 0
     with open(out_path, "w") as f:
-        for tid, steps in traces.items():
-            result = inject_fault(steps, rng=rng)
+        for index, (tid, steps) in enumerate(traces.items()):
+            selected_type = injection_type or INJECTION_TYPES[index % len(INJECTION_TYPES)]
+            result = inject_fault(steps, injection_type=selected_type, rng=rng)
             if result is None:
                 continue
             corrupted_steps, label = result
@@ -103,4 +124,12 @@ def build_fault_dataset(clean_traces_path: str, out_path: str, seed: int = 0):
 
 
 if __name__ == "__main__":
-    build_fault_dataset("traces.jsonl", "faulty_traces.jsonl")
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--clean", default="traces.jsonl")
+    parser.add_argument("--out", default="faulty_traces.jsonl")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--type", choices=INJECTION_TYPES)
+    args = parser.parse_args()
+    build_fault_dataset(args.clean, args.out, seed=args.seed, injection_type=args.type)

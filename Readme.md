@@ -44,3 +44,54 @@ inventing your own — cite it, don't reinvent it.
 - Cross-check against a subsample of MAST's dataset once your
   pipeline exists
 
+## Local quality checks
+
+Run the deterministic checks before building a report or UI:
+
+```text
+python -m unittest -v test_pipeline.py
+python inspect_traces.py
+python fault_injector.py --seed 7 --out faulty_traces.jsonl
+python evaluate_tier1.py
+```
+
+Fault generation now cycles through the five injection types and accepts
+`--seed` for reproducible datasets. Some injection types require a suitable
+trace shape, so the generated count can be lower than the clean trace count.
+The evaluator reports exact localization overall and by injection type.
+
+## Dashboard
+
+Start the local read-only dashboard with:
+
+```text
+streamlit run app.py --server.port 8502
+```
+
+Open `http://localhost:8502`. The dashboard has an overview, a searchable
+trace timeline, and a fault benchmark broken down by injection type.
+
+### Using the UI
+
+The dashboard is a read-only monitoring surface over the JSONL datasets. It
+does not make new model calls or modify trace files.
+
+- **Overview** shows the size of the captured dataset, tool activity, tool
+  errors, and the current Tier 1 benchmark summary.
+- **Trace explorer** lets you filter trace IDs, select a run, and follow its
+  ordered timeline. Each step can show the action type, tool name, arguments,
+  output, latency, and any detector findings.
+- **Fault benchmark** shows exact step localization and any detection across
+  the injected dataset, including a breakdown for each fault type.
+
+Use the UI workflow in this order:
+
+1. Run collection and inspect the **Overview** counts.
+2. Open suspicious runs in **Trace explorer** and review the flagged steps.
+3. Use **Fault benchmark** to compare detector performance by fault type.
+
+The **clean** and **needs review** labels refer to Tier 1 checks. A clean label
+means no deterministic check fired; it does not prove that the model response
+is semantically correct. Similarly, a finding identifies a suspicious step,
+not a final human judgment.
+
